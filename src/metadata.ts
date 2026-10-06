@@ -7,29 +7,46 @@ const exec = promisify(execFile);
 export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date()): Promise<void> {
   const date = capturedAt.toISOString().slice(0, 19).replace("T", " ");
   const args = [
-    "-overwrite_original", "-P",
-    "-Make=" + model.make, "-Model=" + model.model, "-Software=" + model.software,
-    "-LensMake=" + model.lensMake, "-LensModel=" + model.lensModel,
-    "-FocalLength=" + model.focalLength, "-FocalLengthIn35mmFormat=" + model.focalLength35mm,
-    "-FNumber=" + model.fNumber, "-ExposureProgram=Program AE",
-    "-DateTimeOriginal=" + date, "-CreateDate=" + date, "-ModifyDate=" + date,
-    "-ExifVersion=0232", "-ColorSpace=sRGB", "-Flash=No Flash",
-    "-WhiteBalance=Auto", "-MeteringMode=Multi-segment",
-    "-UserComment=iPhone profile: " + model.label + " - " + model.megapixels + " MP",
-    "-CreatorTool=Apple " + model.label,
+    "-overwrite_original", "-P", "-m",
+    "-EXIF:Make=" + model.make, "-EXIF:Model=" + model.model, "-EXIF:Software=" + model.software,
+    "-EXIF:LensMake=" + model.lensMake, "-EXIF:LensModel=" + model.lensModel,
+    "-EXIF:FocalLength=" + model.focalLength, "-EXIF:FocalLengthIn35mmFormat=" + model.focalLength35mm,
+    "-EXIF:FNumber=" + model.fNumber, "-EXIF:ExposureProgram=Program AE",
+    "-EXIF:DateTimeOriginal=" + date, "-EXIF:CreateDate=" + date, "-EXIF:ModifyDate=" + date,
+    "-EXIF:ExifVersion=0232", "-EXIF:ColorSpace=sRGB", "-EXIF:Flash=No Flash",
+    "-EXIF:WhiteBalance=Auto", "-EXIF:MeteringMode=Multi-segment",
+    "-EXIF:UserComment=iPhone profile: " + model.label + " - " + model.megapixels + " MP",
+    "-XMP:Make=" + model.make, "-XMP:Model=" + model.model,
+    "-XMP:CreatorTool=Apple " + model.label,
+    "-XMP:Description=" + model.megapixels + " MP iPhone metadata profile",
     filePath
   ];
 
-  await exec("exiftool", args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+  const result = await exec("exiftool", args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+  if (result.stderr.trim() && !result.stderr.includes("image files updated")) {
+    throw new Error(result.stderr.trim());
+  }
 
-  const make = (await exec("exiftool", ["-s3", "-Make", filePath], { timeout: 10000 })).stdout.trim();
-  const deviceModel = (await exec("exiftool", ["-s3", "-Model", filePath], { timeout: 10000 })).stdout.trim();
+  const verify = await exec("exiftool", [
+    "-j", "-EXIF:Make", "-EXIF:Model", "-EXIF:Software",
+    "-EXIF:LensModel", "-EXIF:FocalLength", "-EXIF:FNumber",
+    "-EXIF:DateTimeOriginal", "-EXIF:UserComment", filePath
+  ], { timeout: 10000, maxBuffer: 1024 * 1024 });
 
-  if (make !== model.make || deviceModel !== model.model) {
-    throw new Error("EXIF verification failed: Make=" + make + " Model=" + deviceModel);
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(verify.stdout);
+    data = parsed[0] ?? {};
+  } catch {
+    throw new Error("EXIF verification failed: ExifTool returned invalid metadata");
+  }
+
+  if (String(data.Make ?? "") !== model.make || String(data.Model ?? "") !== model.model) {
+    throw new Error("EXIF verification failed: metadata was not written to the output image");
+  }
+  if (!String(data.UserComment ?? "").includes(model.megapixels + " MP")) {
+    throw new Error("EXIF verification failed: megapixel profile was not written");
   }
 }
 
-export async function closeMetadata(): Promise<void> {
-  // System ExifTool is invoked per operation; there is no persistent process to close.
-}
+export async function closeMetadata(): Promise<void> {}
