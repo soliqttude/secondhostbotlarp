@@ -1,6 +1,6 @@
 import path from "node:path"; import { fileURLToPath } from "node:url";
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
-export const FOUNDER_ID=Number(process.env.FOUNDER_ID??"0");
+export const FOUNDER_ID=process.env.FOUNDER_ID??"";
 export const SUPPORT_CONTACT=process.env.SUPPORT_CONTACT??"contact an administrator";
 export const BOT_TOKEN=process.env.DISCORD_TOKEN??""; export const CLIENT_ID=process.env.CLIENT_ID??""; export const GUILD_ID=process.env.GUILD_ID??"";
 export const ROOT_DIR=path.resolve(__dirname,".."); export const DATA_DIR=path.join(ROOT_DIR,"data"); export const TMP_DIR=path.join(ROOT_DIR,"tmp"); export const DB_PATH=path.join(DATA_DIR,"bot.sqlite"); export const BACKUP_DIR=path.join(DATA_DIR,"backups");
