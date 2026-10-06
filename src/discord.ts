@@ -2,7 +2,7 @@ import {Client,Interaction,SlashCommandBuilder,ActionRowBuilder,StringSelectMenu
 import fs from "node:fs/promises"; import path from "node:path"; import crypto from "node:crypto";
 import {ensureUser,effectiveRole,ROLE_LABEL,hasRoleAtLeast,getUser,getUserByDiscordId,setBan,setPlan,setRole} from "./roles.js";
 import {db,nowMs} from "./db.js"; import {getBalance,addCredits,setCredits,takeCredits,deductCredit,refundCredit,InsufficientCreditsError} from "./credits.js";
-import {IPHONE_MODELS,findModel} from "./models.js"; import {IMAGE_COST,MAX_IMAGE_BYTES,TMP_DIR,SUPPORT_CONTACT} from "./config.js";
+import {IPHONE_MODELS,findModel} from "./models.js"; import {IMAGE_COST,MAX_IMAGE_BYTES,TMP_DIR,SUPPORT_CONTACT,JOB_TIMEOUT_MS} from "./config.js";
 import {resizeToAppleSensor,analyzeBrightness,pickRealisticExposure,encodeAsHeic} from "./image.js"; import {injectIPhoneExif} from "./exif.js";
 import {submit,QueueFullError,UserBusyError,DuplicateJobError,JobTimeoutError} from "./queue.js"; import {writeLog,recentLogs,clearLogs} from "./logs.js";
 import {analyticsSummary,serverStats,topModelsTable,topUsersTable} from "./analytics.js"; import {logger} from "./logger.js"; import {state,setMaintenance,setLocked,setPanic,setDebug,setRateLimit} from "./state.js"; import {killQueue,resetQueue,queueStats} from "./queue.js"; import {backupDatabase} from "./db.js"; import {BACKUP_DIR} from "./config.js";
@@ -148,7 +148,8 @@ async function processDiscordImage(i:any,id:number,url:string,name:string,m:any,
  try{
   stage="download";
   logger.info({userId:id,url:url.slice(0,80)},"image:download:start");
-  const r=await fetch(url);
+  const sig=AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const r=await fetch(url,{signal:sig});
   if(!r.ok)throw new Error(`download failed: HTTP ${r.status}`);
   const input=path.join(dir,"input");
   await fs.writeFile(input,Buffer.from(await r.arrayBuffer()));
@@ -158,7 +159,7 @@ async function processDiscordImage(i:any,id:number,url:string,name:string,m:any,
   stage="brightness";
   const ex=pickRealisticExposure(await analyzeBrightness(resized.outputPath));
   stage="heic";
-  const heic=await encodeAsHeic(resized.outputPath);
+  const heic=await encodeAsHeic(resized.outputPath,75,sig);
   stage="exif";
   const out=await injectIPhoneExif(heic.outputPath,m,{width:resized.width,height:resized.height},new Date(),ex);
   outCleanup=out.cleanup;
