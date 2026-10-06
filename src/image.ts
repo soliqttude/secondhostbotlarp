@@ -1,6 +1,8 @@
 import sharp from "sharp";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 /** Default megapixels reported when no per-model target is passed. */
 export const TARGET_MEGAPIXELS = 12;
@@ -141,10 +143,9 @@ export function pickRealisticExposure(meanLuma: number): ExposureSettings {
   return { iso: pick.iso, exposureTimeStr: pick.shutter };
 }
 
-/**
- * Re-encode a JPEG/PNG into a real HEIC (HEVC) file using libheif's `heif-enc`
- * with the x265 backend.
- */
+/** Re-encode a JPEG into a real HEIC (HEVC) file using libheif/heif-enc. */
+const execFileAsync = promisify(execFile);
+
 export async function encodeAsHeic(
   inputPath: string,
   quality = 75,
@@ -152,11 +153,29 @@ export async function encodeAsHeic(
   const dir = path.dirname(inputPath);
   const base = path.basename(inputPath, path.extname(inputPath));
   const outputPath = path.join(dir, `${base}.heic`);
+  const q = Math.max(1, Math.min(100, Math.round(quality)));
 
-  await sharp(inputPath, { failOn: "none" })
-    .heif({ compression: "hevc", quality })
-    .toFile(outputPath);
+  try {
+    await execFileAsync(
+      "heif-enc",
+      ["--hevc", "--quality", String(q), "--output", outputPath, inputPath],
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+    );
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      throw new Error(
+        "HEIC encoder unavailable: libheif/heif-enc is not installed in the Render runtime",
+      );
+    }
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+    const detail = stderr || stdout || error?.message || "unknown heif-enc error";
+    throw new Error(`HEIC encoding failed: ${detail}`);
+  }
 
-  const stat = await fs.stat(outputPath);
+  const stat = await fs.stat(outputPath).catch(() => null);
+  if (!stat || stat.size === 0) {
+    throw new Error("HEIC encoding failed: heif-enc produced no output file");
+  }
   return { outputPath, bytes: stat.size };
 }
