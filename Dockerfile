@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm install
 COPY tsconfig.json ./
 COPY src ./src
+RUN npm run build
 RUN exiftool -ver && node --version
 EXPOSE 10000
-CMD ["npm","start"]
+CMD ["node","dist/index.js"]
