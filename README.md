@@ -1,9 +1,32 @@
 # iPhone Metadata Discord Bot
 
-Applies a selected iPhone camera metadata profile to an uploaded photo. It does not AI-generate, resize, or creatively alter the image.
+Upload a photo, select an iPhone profile, and receive the same image with the selected camera metadata applied.
 
-Commands: /image, /models, /credits, /help
+No AI generation, resizing, cropping, or image recreation.
 
-Environment: DISCORD_TOKEN, CLIENT_ID, optional GUILD_ID and FOUNDER_ID.
+## Render deployment
 
-Render: build `npm install`, start `npm start`, port 10000.
+Build command:
+`npm install`
+
+Start command:
+`npm start`
+
+Environment variables:
+- `DISCORD_TOKEN` — bot token
+- `CLIENT_ID` — Discord application ID
+- `GUILD_ID` — optional, recommended for instant command registration
+- `FOUNDER_ID` — optional founder/admin Discord ID
+- `PORT` — Render provides this automatically
+
+The included Dockerfile installs ExifTool automatically.
+
+## Commands
+
+`/image` — upload a photo and select an iPhone profile
+`/models` — list profiles
+`/credits` — view credits
+`/help` — help
+`/addcredits` — founder-only credit command
+
+The MP value is part of the selected metadata profile. The source image is not resized to that megapixel count.
