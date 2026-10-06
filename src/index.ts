@@ -1,61 +1,37 @@
+import { REST, Routes } from "discord.js";
 import { buildBot } from "./bot.js";
+import { BOT_TOKEN, CLIENT_ID, GUILD_ID } from "./config.js";
 import { logger } from "./logger.js";
 import { writeLog } from "./logs.js";
-import { syncCommandMenus } from "./command_menu.js";
+import { commandDefinitions } from "./discord.js";
 
 async function main() {
+  if (!BOT_TOKEN) throw new Error("DISCORD_TOKEN is not set");
+  if (!CLIENT_ID) throw new Error("CLIENT_ID is not set");
+
   const bot = buildBot();
 
-  process.once("SIGINT", () => {
-    logger.info("SIGINT received, stopping bot");
-    bot.stop("SIGINT");
-  });
-  process.once("SIGTERM", () => {
-    logger.info("SIGTERM received, stopping bot");
-    bot.stop("SIGTERM");
-  });
+  process.once("SIGINT", () => bot.destroy());
+  process.once("SIGTERM", () => bot.destroy());
 
   process.on("unhandledRejection", (reason) => {
     logger.error({ reason }, "unhandledRejection");
-    writeLog({
-      type: "error",
-      action: "unhandledRejection",
-      meta: { reason: String(reason) },
-    });
+    writeLog({ type: "error", action: "unhandledRejection", meta: { reason: String(reason) } });
   });
   process.on("uncaughtException", (err) => {
     logger.error({ err }, "uncaughtException");
-    writeLog({
-      type: "error",
-      action: "uncaughtException",
-      meta: { message: err.message },
-    });
+    writeLog({ type: "error", action: "uncaughtException", meta: { message: err.message } });
   });
 
-  await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-  bot
-    .launch(() => {
-      logger.info("bot launched (long polling)");
-      writeLog({ type: "system", action: "boot" });
-    })
-    .catch((err) => {
-      logger.error({ err }, "launch failed");
-      process.exit(1);
-    });
+  const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
+  const route = GUILD_ID
+    ? Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID)
+    : Routes.applicationCommands(CLIENT_ID);
 
-  try {
-    const me = await bot.telegram.getMe();
-    logger.info({ username: me.username, id: me.id }, "bot identity");
-  } catch (err) {
-    logger.error({ err }, "getMe failed");
-  }
+  await rest.put(route, { body: commandDefinitions });
+  logger.info({ guild: GUILD_ID || "global", commands: commandDefinitions.length }, "slash commands synced");
 
-  try {
-    await syncCommandMenus(bot);
-    logger.info("command menus synced");
-  } catch (err) {
-    logger.error({ err }, "syncCommandMenus failed");
-  }
+  await bot.login(BOT_TOKEN);
 }
 
 main().catch((err) => {
