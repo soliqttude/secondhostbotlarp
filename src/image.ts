@@ -5,6 +5,10 @@ import { DATA_DIR } from "./config.js";
 import { applyIPhoneMetadata } from "./metadata.js";
 import type { IPhoneModel } from "./models.js";
 
+// Keep memory predictable on small Render instances when generating 48 MP JPEGs.
+sharp.concurrency(1);
+sharp.cache({ memory: 32, files: 0, items: 0 });
+
 const MAX = 25 * 1024 * 1024;
 
 export async function processImage(url: string, originalName: string, model: IPhoneModel, userId: string) {
@@ -27,7 +31,6 @@ export async function processImage(url: string, originalName: string, model: IPh
     // libvips/sharp is substantially more memory-efficient than ImageMagick
     // for large 48 MP outputs on small Render instances.
     await sharp(input, { limitInputPixels: 100_000_000 })
-      .rotate()
       .resize(width, height, {
         fit: "cover",
         position: "centre",
@@ -35,9 +38,10 @@ export async function processImage(url: string, originalName: string, model: IPh
       })
       .jpeg({
         quality: 88,
-        chromaSubsampling: "4:4:4",
-        progressive: true,
-        mozjpeg: false
+        chromaSubsampling: "4:2:0",
+        progressive: false,
+        mozjpeg: false,
+        effort: 1
       })
       .toFile(outputFile);
 
