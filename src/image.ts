@@ -271,6 +271,28 @@ function runHeifEnc(
   });
 }
 
+/** heif-enc argv. Tuning flags keep x265 to one thread to bound memory/CPU. */
+export function buildHeifArgs(
+  quality: number,
+  outputPath: string,
+  inputPath: string,
+  tuned: boolean,
+): string[] {
+  const args = ["--quality", String(quality)];
+  if (tuned) {
+    args.push(
+      "-p",
+      "x265:pools=none",
+      "-p",
+      "x265:frame-threads=1",
+      "-p",
+      "x265:log-level=2",
+    );
+  }
+  args.push("--output", outputPath, inputPath);
+  return args;
+}
+
 function formatHeicError(error: any): string {
   const stderr =
     typeof error?.stderr === "string"
@@ -320,22 +342,27 @@ export async function encodeAsHeic(
     try {
       await fs.rm(outputPath, { force: true }).catch(() => {});
       logger.info({ quality: q, outputPath }, "image:heic:encode-attempt");
-      await runHeifEnc(
-        [
-          "--quality",
-          String(q),
-          "-p",
-          "x265:pools=none",
-          "-p",
-          "x265:frame-threads=1",
-          "-p",
-          "x265:log-level=2",
-          "--output",
-          outputPath,
-          inputPath,
-        ],
-        signal,
-      );
+      try {
+        await runHeifEnc(buildHeifArgs(q, outputPath, inputPath, true), signal);
+      } catch (tuned: any) {
+        // The x265 tuning flags are optional. If this heif-enc/libheif build
+        // rejects one of them (unknown parameter), retry once without them
+        // instead of failing every encode. Crashes, timeouts and aborts are
+        // real failures and are not retried.
+        const msg = `${tuned?.stderr ?? ""}${tuned?.stdout ?? ""}`;
+        const rejectedFlag =
+          typeof tuned?.status === "number" &&
+          tuned.status !== 0 &&
+          !tuned?.signal &&
+          /unknown|invalid|unsupported|not supported|parameter|option/i.test(msg);
+        if (!rejectedFlag) throw tuned;
+        logger.warn(
+          { quality: q, detail: formatHeicError(tuned) },
+          "image:heic:tuning-flags-rejected-retrying-plain",
+        );
+        await fs.rm(outputPath, { force: true }).catch(() => {});
+        await runHeifEnc(buildHeifArgs(q, outputPath, inputPath, false), signal);
+      }
     } catch (error: any) {
       if (error?.code === "ENOENT") {
         throw new Error(
