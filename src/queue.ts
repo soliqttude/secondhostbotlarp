@@ -122,8 +122,8 @@ export async function submit<T>(
 
   if (activeUsers.has(ctx.userId)) throw new UserBusyError();
   if (inflight.has(ctx.jobKey)) throw new DuplicateJobError();
-  if (!rememberJob(ctx.jobKey, ctx.userId)) throw new DuplicateJobError();
   if (pending.length >= QUEUE_MAX_SIZE) throw new QueueFullError();
+  if (!rememberJob(ctx.jobKey, ctx.userId)) throw new DuplicateJobError();
 
   return new Promise<T>((resolve, reject) => {
     const ac = new AbortController();
@@ -183,7 +183,10 @@ async function runOne(job: QueuedJob<unknown>): Promise<void> {
     ]);
     resolve(result);
   } catch (err) {
-    logger.warn({ err, userId: ctx.userId }, "job failed");
+    // A failed job must be retryable. Successful jobs remain in
+    // processed_jobs as an idempotency record.
+    db.prepare("DELETE FROM processed_jobs WHERE job_key = ?").run(ctx.jobKey);
+    logger.warn({ err, userId: ctx.userId, jobKey: ctx.jobKey }, "job failed");
     reject(err);
   } finally {
     clearTimeout(timer);
