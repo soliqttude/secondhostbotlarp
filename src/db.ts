@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS images (
   file_unique   TEXT,
   created_at    INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_users_discord ON users(discord_id);
 CREATE INDEX IF NOT EXISTS idx_images_user ON images(user_id);
 CREATE INDEX IF NOT EXISTS idx_images_model ON images(model);
 
