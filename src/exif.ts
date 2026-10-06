@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { exiftool } from "exiftool-vendored";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -78,48 +78,41 @@ export async function injectIPhoneExif(
   const targetPath = path.join(workDir, `IMG_${capturedAt.getTime()}${ext}`);
   await fs.copyFile(inputPath, targetPath);
 
-  const args = [
-    "-overwrite_original",
-    "-q",
-    "-m",
-    `-Make=Apple`,
-    `-Model=${meta.model}`,
-    `-Software=${meta.software}`,
-    `-LensMake=Apple`,
-    `-LensModel=${meta.lensModel}`,
-    `-FNumber=${meta.fNumber}`,
-    `-ApertureValue=${meta.fNumber}`,
-    `-ISO=${iso}`,
-    `-ExposureTime=${shutter}`,
-    `-ShutterSpeedValue=${shutter}`,
-    `-FocalLength=${meta.focalLength}`,
-    `-FocalLengthIn35mmFormat=${meta.focalLengthIn35mm}`,
-    // Dimensions are written across every supported EXIF/XMP group so any
-    // reader (Photos.app, exiftool composite, third-party EXIF tools) reports
-    // the same numbers as the actual encoded JPEG (8000x6000 / 6000x8000 = 48 MP).
-    `-IFD0:ImageWidth=${dims.width}`,
-    `-IFD0:ImageHeight=${dims.height}`,
-    `-ExifIFD:ExifImageWidth=${dims.width}`,
-    `-ExifIFD:ExifImageHeight=${dims.height}`,
-    `-XMP-tiff:ImageWidth=${dims.width}`,
-    `-XMP-tiff:ImageHeight=${dims.height}`,
-    `-DateTimeOriginal=${ts.date}`,
-    `-CreateDate=${ts.date}`,
-    `-ModifyDate=${ts.date}`,
-    `-OffsetTime=${ts.offset}`,
-    `-OffsetTimeOriginal=${ts.offset}`,
-    `-OffsetTimeDigitized=${ts.offset}`,
-    `-ExifVersion=0232`,
-    `-ColorSpace=sRGB`,
-    `-Flash=Off, Did not fire`,
-    `-WhiteBalance=Auto`,
-    `-MeteringMode=MultiSegment`,
-    `-ExposureProgram=Program AE`,
-    `-Orientation=Horizontal (normal)`,
-    targetPath,
-  ];
+  const tags: Record<string, string | number> = {
+    Make: "Apple",
+    Model: meta.model,
+    Software: meta.software,
+    LensMake: "Apple",
+    LensModel: meta.lensModel,
+    FNumber: meta.fNumber,
+    ApertureValue: meta.fNumber,
+    ISO: iso,
+    ExposureTime: shutter,
+    ShutterSpeedValue: shutter,
+    FocalLength: meta.focalLength,
+    FocalLengthIn35mmFormat: meta.focalLengthIn35mm,
+    "IFD0:ImageWidth": dims.width,
+    "IFD0:ImageHeight": dims.height,
+    "ExifIFD:ExifImageWidth": dims.width,
+    "ExifIFD:ExifImageHeight": dims.height,
+    "XMP-tiff:ImageWidth": dims.width,
+    "XMP-tiff:ImageHeight": dims.height,
+    DateTimeOriginal: ts.date,
+    CreateDate: ts.date,
+    ModifyDate: ts.date,
+    OffsetTime: ts.offset,
+    OffsetTimeOriginal: ts.offset,
+    OffsetTimeDigitized: ts.offset,
+    ExifVersion: "0232",
+    ColorSpace: 1,
+    Flash: "Off, Did not fire",
+    WhiteBalance: "Auto",
+    MeteringMode: "Multi-segment",
+    ExposureProgram: "Program AE",
+    Orientation: "Horizontal (normal)",
+  };
 
-  await runExiftool(args);
+  await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);  await runExiftool(args);
 
   return {
     outputPath: targetPath,
@@ -133,15 +126,3 @@ export async function injectIPhoneExif(
   };
 }
 
-function runExiftool(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("exiftool", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`exiftool failed (code ${code}): ${stderr.trim()}`));
-    });
-  });
-}
