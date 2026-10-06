@@ -17,6 +17,12 @@ export class DuplicateJobError extends Error {
     super("duplicate job");
   }
 }
+export class JobTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`job timeout after ${ms}ms`);
+    this.name = "JobTimeoutError";
+  }
+}
 
 export interface JobContext {
   userId: number;
@@ -178,17 +184,39 @@ async function runOne(job: QueuedJob<unknown>): Promise<void> {
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
+    logger.warn(
+      { userId: ctx.userId, jobKey: ctx.jobKey, timeoutMs: JOB_TIMEOUT_MS },
+      "job timeout — aborting signal",
+    );
     ac.abort();
   }, JOB_TIMEOUT_MS);
 
+  // Race the worker against abort so a hung stage that ignores AbortSignal
+  // still settles the queue slot once the deadline fires. Without this,
+  // await run() can block forever (heif-enc / exiftool / Discord upload)
+  // and leave the user stuck on "Processing…".
+  const abortPromise = new Promise<never>((_, rej) => {
+    if (ac.signal.aborted) {
+      rej(new JobTimeoutError(JOB_TIMEOUT_MS));
+      return;
+    }
+    ac.signal.addEventListener(
+      "abort",
+      () => {
+        rej(
+          timedOut
+            ? new JobTimeoutError(JOB_TIMEOUT_MS)
+            : new Error("job aborted"),
+        );
+      },
+      { once: true },
+    );
+  });
+
   try {
-    // Do not race the worker against the timeout. Abort the worker at the
-    // deadline, then wait for it to actually unwind before releasing the
-    // user's active-job lock. This prevents timed-out image work from
-    // continuing while the queue accepts another job for the same user.
-    const result = await run(linkedCtx);
+    const result = await Promise.race([run(linkedCtx), abortPromise]);
     if (timedOut) {
-      throw new Error("job timeout");
+      throw new JobTimeoutError(JOB_TIMEOUT_MS);
     }
     resolve(result);
   } catch (err) {
