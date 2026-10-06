@@ -74,11 +74,12 @@ export async function injectIPhoneExif(
     `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
   );
   await fs.mkdir(workDir, { recursive: true });
-  const ext = path.extname(inputPath) || ".jpg";
-  const targetPath = path.join(workDir, `IMG_${capturedAt.getTime()}${ext}`);
-  await fs.copyFile(inputPath, targetPath);
+  try {
+    const ext = path.extname(inputPath) || ".jpg";
+    const targetPath = path.join(workDir, `IMG_${capturedAt.getTime()}${ext}`);
+    await fs.copyFile(inputPath, targetPath);
 
-  const tags: Record<string, string | number> = {
+    const tags: Record<string, string | number> = {
     Make: "Apple",
     Model: meta.model,
     Software: meta.software,
@@ -112,22 +113,16 @@ export async function injectIPhoneExif(
     Orientation: "Vertical (normal)",
   };
 
-  try {
     await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
+    return {
+      outputPath: targetPath,
+      cleanup: async () => {
+        try { await fs.rm(workDir, { recursive: true, force: true }); } catch {}
+      },
+    };
   } catch (error) {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
-
-  return {
-    outputPath: targetPath,
-    cleanup: async () => {
-      try {
-        await fs.rm(workDir, { recursive: true, force: true });
-      } catch {
-        // ignore
-      }
-    },
-  };
 }
 
