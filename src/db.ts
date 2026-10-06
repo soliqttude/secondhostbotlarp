@@ -16,6 +16,7 @@ rawDb.exec("PRAGMA busy_timeout = 5000");
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
+  discord_id  TEXT UNIQUE,
   user_id     INTEGER PRIMARY KEY,
   username    TEXT,
   first_name  TEXT,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS images (
   file_unique   TEXT,
   created_at    INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_users_discord ON users(discord_id);
 CREATE INDEX IF NOT EXISTS idx_images_user ON images(user_id);
 CREATE INDEX IF NOT EXISTS idx_images_model ON images(model);
 
@@ -72,6 +74,8 @@ CREATE TABLE IF NOT EXISTS settings (
 `;
 
 rawDb.exec(SCHEMA);
+try { rawDb.exec("ALTER TABLE users ADD COLUMN discord_id TEXT"); } catch { /* column already exists */ }
+rawDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_unique ON users(discord_id) WHERE discord_id IS NOT NULL");
 
 logger.info({ path: DB_PATH }, "sqlite ready");
 
