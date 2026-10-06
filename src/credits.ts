@@ -1,5 +1,4 @@
 import { db, nowMs } from "./db.js";
-import { ensureUser } from "./roles.js";
 import { writeLog } from "./logs.js";
 
 export class InsufficientCreditsError extends Error {
@@ -64,7 +63,6 @@ export function refundCredit(
 }
 
 export function setCredits(userId: number, value: number): void {
-  ensureUser(userId);
   const v = Math.max(0, Math.floor(value));
   db.prepare(
     "UPDATE users SET credits = ?, updated_at = ? WHERE user_id = ?",
@@ -78,7 +76,6 @@ export function setCredits(userId: number, value: number): void {
 }
 
 export function addCredits(userId: number, amount: number): number {
-  ensureUser(userId);
   const a = Math.max(0, Math.floor(amount));
   db.prepare(
     "UPDATE users SET credits = credits + ?, updated_at = ? WHERE user_id = ?",
@@ -93,7 +90,6 @@ export function addCredits(userId: number, amount: number): number {
 }
 
 export function takeCredits(userId: number, amount: number): number {
-  ensureUser(userId);
   const a = Math.max(0, Math.floor(amount));
   const tx = db.transaction(() => {
     const row = db
