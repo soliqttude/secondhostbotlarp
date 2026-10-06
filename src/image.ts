@@ -158,7 +158,7 @@ export async function encodeAsHeic(
   try {
     await execFileAsync(
       "heif-enc",
-      ["--hevc", "--quality", String(q), "--output", outputPath, inputPath],
+      ["--hevc", "--quality", String(q), inputPath, "--output", outputPath],
       { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
     );
   } catch (error: any) {
