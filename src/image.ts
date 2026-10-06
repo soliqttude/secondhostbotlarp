@@ -159,3 +159,4 @@ export async function encodeAsHeic(
 
   const stat = await fs.stat(outputPath);
   return { outputPath, bytes: stat.size };
+}
