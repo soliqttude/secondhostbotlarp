@@ -33,7 +33,7 @@ logger.info({commands:body.length},"slash commands synced");
 export function buildClient(){
 const client=new Client({intents:[]});
 client.once(Events.ClientReady,r=>logger.info({user:r.user.tag},"bot ready"));
-client.on(Events.InteractionCreate",async i=>{
+client.on(Events.InteractionCreate,async i=>{
 try{if(i.isChatInputCommand())await handleCommand(i);else if(i.isStringSelectMenu()&&i.customId===SELECT_ID)await handleSelection(i);}
 catch(error){logger.error({err:error},"interaction failed");if(i.isRepliable()&&!i.replied&&!i.deferred)await i.reply({content:"❌ Something went wrong.",ephemeral:true}).catch(()=>undefined);}
 });
