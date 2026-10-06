@@ -13,8 +13,10 @@ RUN printf '%s\n' \
     && apt-get install -y --no-install-recommends \
       libimage-exiftool-perl \
     && apt-get install -y --no-install-recommends -t bookworm-backports \
+      libheif1 \
       libheif-examples \
       libheif-plugin-x265 \
+      libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -24,10 +26,14 @@ RUN npm install --omit=dev
 
 COPY . .
 
-RUN exiftool -ver \
-    && heif-enc -v \
-    && heif-enc --help \
-    && node --version
+# Build-time smoke test: verify HEVC encoder is actually available and can encode.
+# heif-enc -v / --help succeed even when no encoder plugins are loaded.
+RUN set -eux; \
+    exiftool -ver; \
+    heif-enc -v; \
+    heif-enc --list-encoders; \
+    node --version; \
+    node scripts/heic-smoke.mjs
 
 EXPOSE 10000
 

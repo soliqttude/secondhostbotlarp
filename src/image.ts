@@ -21,13 +21,16 @@ export interface ResizeResult {
  * count when measured from pixel dims (since EXIF readers compute Megapixels
  * from width x height, not from any tag we write).
  *
- *   12 MP → 2598 x 4619  (12.0 MP at 9:16)
- *   24 MP → 3674 x 6532  (24.0 MP at 9:16)
+ * Both axes are forced even so HEVC 4:2:0 (x265) accepts the frame.
+ *
+ *   12 MP → 2598 x 4618  (~12.0 MP at 9:16)
+ *   18 MP → 3182 x 5656  (~18.0 MP at 9:16)
+ *   24 MP → 3674 x 6532  (~24.0 MP at 9:16)
  */
 function pickDims(targetMegapixels: number): { width: number; height: number } {
   if (targetMegapixels >= 24) return { width: 3674, height: 6532 };
-  if (targetMegapixels >= 18) return { width: 3182, height: 5657 };
-  return { width: 2598, height: 4619 };
+  if (targetMegapixels >= 18) return { width: 3182, height: 5656 };
+  return { width: 2598, height: 4618 };
 }
 
 /**
@@ -146,6 +149,30 @@ export function pickRealisticExposure(meanLuma: number): ExposureSettings {
 /** Re-encode a JPEG into a real HEIC (HEVC) file using libheif/heif-enc. */
 const execFileAsync = promisify(execFile);
 
+function streamText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Buffer.isBuffer(value)) return value.toString("utf8").trim();
+  return "";
+}
+
+function formatHeicError(error: any): string {
+  const stderr = streamText(error?.stderr);
+  const stdout = streamText(error?.stdout);
+  const signal = error?.signal ? ` signal=${error.signal}` : "";
+  const code =
+    error?.code != null && error.code !== "ENOENT"
+      ? ` code=${error.code}`
+      : "";
+  const status =
+    error?.status != null ? ` status=${error.status}` : "";
+  const detail =
+    stderr ||
+    stdout ||
+    error?.message ||
+    "unknown heif-enc error";
+  return `${detail}${signal}${code}${status}`.trim();
+}
+
 export async function encodeAsHeic(
   inputPath: string,
   quality = 75,
@@ -153,18 +180,38 @@ export async function encodeAsHeic(
   const dir = path.dirname(inputPath);
   const base = path.basename(inputPath, path.extname(inputPath));
   const outputPath = path.join(dir, `${base}.heic`);
-  const qualities = Array.from(new Set([quality, 65, 55, 45, 35, 25]))
-    .map((v) => Math.max(1, Math.min(100, Math.round(v))));
+  const qualities = Array.from(new Set([quality, 65, 55, 45, 35, 25])).map(
+    (v) => Math.max(1, Math.min(100, Math.round(v))),
+  );
   const maxDiscordBytes = 9.5 * 1024 * 1024;
 
   let lastError: unknown = null;
   for (const q of qualities) {
     try {
       await fs.rm(outputPath, { force: true }).catch(() => {});
+      // Low-memory x265 settings help on constrained Render instances when
+      // encoding 12–24 MP stills. pools=none disables thread pools; frame
+      // threads stay at 1 so peak RSS stays manageable.
       await execFileAsync(
         "heif-enc",
-        ["--quality", String(q), "--output", outputPath, inputPath],
-        { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+        [
+          "--quality",
+          String(q),
+          "-p",
+          "x265:pools=none",
+          "-p",
+          "x265:frame-threads=1",
+          "-p",
+          "x265:log-level=2",
+          "--output",
+          outputPath,
+          inputPath,
+        ],
+        {
+          timeout: 180_000,
+          maxBuffer: 8 * 1024 * 1024,
+          encoding: "utf8",
+        },
       );
     } catch (error: any) {
       lastError = error;
@@ -173,10 +220,10 @@ export async function encodeAsHeic(
           "HEIC encoder unavailable: libheif/heif-enc is not installed in the Render runtime",
         );
       }
-      const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
-      const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
-      const detail = stderr || stdout || error?.message || "unknown heif-enc error";
-      throw new Error(`HEIC encoding failed: ${detail}`);
+      // Encoder hard-failures (missing plugin, bad dims, OOM signal) should
+      // surface immediately with the real stderr. Size-only retries continue
+      // below when encoding succeeds but the file is too large for Discord.
+      throw new Error(`HEIC encoding failed: ${formatHeicError(error)}`);
     }
 
     const stat = await fs.stat(outputPath).catch(() => null);
