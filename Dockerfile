@@ -6,7 +6,7 @@ FROM node:24-bookworm
 ENV NODE_ENV=production
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libheif-examples libheif-plugin-x265 libimage-exiftool-perl \
+    && apt-get install -y --no-install-recommends libheif-examples libimage-exiftool-perl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -16,7 +16,7 @@ RUN npm install --omit=dev
 
 COPY . .
 
-RUN exiftool -ver && heif-enc -v && heif-enc --list-encoders && node --version
+RUN exiftool -ver && heif-enc -v && heif-enc --help && node --version
 
 EXPOSE 10000
 
