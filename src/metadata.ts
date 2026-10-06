@@ -6,16 +6,21 @@ const exiftool = new ExifTool({ taskTimeoutMillis: 30_000, spawnTimeoutMillis: 1
 export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date()): Promise<void> {
   const localDate = capturedAt.toISOString().slice(0, 19).replace("T", " ");
   await exiftool.write(filePath, {
-    Make:model.make, Model:model.model, Software:model.software,
-    LensMake:model.lensMake, LensModel:model.lensModel,
-    FocalLength:model.focalLength, FocalLengthIn35mmFormat:model.focalLength35mm,
-    FNumber:model.fNumber, ExposureProgram:"Program AE",
-    DateTimeOriginal:localDate, CreateDate:localDate, ModifyDate:localDate,
-    ExifVersion:"0232", ColorSpace:"sRGB", Flash:"No Flash",
-    WhiteBalance:"Auto", MeteringMode:"Multi-segment",
-    UserComment:"iPhone profile: "+model.label+" - "+model.megapixels+" MP",
-    CreatorTool:"Apple "+model.label
+    Make: model.make, Model: model.model, Software: model.software,
+    LensMake: model.lensMake, LensModel: model.lensModel,
+    FocalLength: model.focalLength, FocalLengthIn35mmFormat: model.focalLength35mm,
+    FNumber: model.fNumber, ExposureProgram: "Program AE",
+    DateTimeOriginal: localDate, CreateDate: localDate, ModifyDate: localDate,
+    ExifVersion: "0232", ColorSpace: "sRGB", Flash: "No Flash",
+    WhiteBalance: "Auto", MeteringMode: "Multi-segment",
+    UserComment: "iPhone profile: " + model.label + " - " + model.megapixels + " MP",
+    CreatorTool: "Apple " + model.label
   }, ["-overwrite_original"]);
-}
 
-export async function closeMetadata():Promise<void>{await exiftool.end();}
+  const verify = await exiftool.read(filePath);
+  const tags = verify as Record<string, unknown>;
+  if (String(tags.Make ?? "") !== model.make || String(tags.Model ?? "") !== model.model) {
+    throw new Error("metadata verification failed: EXIF Make/Model was not written");
+  }
+}
+export async function closeMetadata(): Promise<void> { await exiftool.end(); }
