@@ -1,6 +1,8 @@
 import { ExifTool } from "exiftool-vendored";
 import type { IPhoneModel } from "./models.js";
-const exiftool = new ExifTool({ taskTimeoutMillis: 120000, spawnTimeoutMillis: 30000 });
+
+const exiftool = new ExifTool({ taskTimeoutMillis: 30_000, spawnTimeoutMillis: 10_000, maxProcs: 1 });
+
 export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date()): Promise<void> {
   const localDate = capturedAt.toISOString().slice(0, 19).replace("T", " ");
   await exiftool.write(filePath, {
@@ -13,6 +15,7 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     WhiteBalance:"Auto", MeteringMode:"Multi-segment",
     UserComment:"iPhone profile: "+model.label+" - "+model.megapixels+" MP",
     CreatorTool:"Apple "+model.label
-  }, ["-overwrite_original","-q","-P"]);
+  }, ["-overwrite_original"]);
 }
+
 export async function closeMetadata():Promise<void>{await exiftool.end();}
