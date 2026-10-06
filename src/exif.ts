@@ -112,7 +112,7 @@ export async function injectIPhoneExif(
     Orientation: "Horizontal (normal)",
   };
 
-  await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);  await runExiftool(args);
+  await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
 
   return {
     outputPath: targetPath,
