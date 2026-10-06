@@ -7,8 +7,11 @@ import type { IPhoneModelMeta } from "./models.js";
 import { logger } from "./logger.js";
 
 const exiftool = new ExifTool({
-  taskTimeoutMillis: 120_000,
-  spawnTimeoutMillis: 60_000,
+  // HEIC metadata writes can require a full container rewrite. Keep enough
+  // headroom for a large HEIC, but don't use the -m option: ExifTool documents
+  // that -m can cause hangs on some files.
+  taskTimeoutMillis: 180_000,
+  spawnTimeoutMillis: 30_000,
 });
 
 if (!(await fileExists(TMP_DIR))) {
@@ -120,7 +123,7 @@ export async function injectIPhoneExif(
     await exiftool.write(targetPath, tags as any, [
       "-overwrite_original",
       "-q",
-      "-m",
+      "-P",
     ]);
     logger.info(
       { targetPath, ms: Date.now() - t0 },
