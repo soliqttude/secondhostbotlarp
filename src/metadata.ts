@@ -6,6 +6,7 @@ const exec = promisify(execFile);
 
 export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date(), width?: number, height?: number): Promise<void> {
   const date = capturedAt.toISOString().slice(0, 19).replace("T", " ");
+  const lensInfo = [model.focalLength, model.focalLength, model.fNumber, model.fNumber].join(" ");
   const args = [
     "-overwrite_original", "-P", "-m",
     "-Make=" + model.make,
@@ -13,6 +14,7 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     "-Software=" + model.software,
     "-LensMake=" + model.lensMake,
     "-LensModel=" + model.lensModel,
+    "-LensInfo=" + lensInfo,
     "-FocalLength=" + model.focalLength,
     "-FocalLengthIn35mmFormat=" + model.focalLength35mm,
     "-FNumber=" + model.fNumber,
@@ -22,6 +24,7 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     "-ShutterSpeedValue=" + Math.log2(120),
     "-ISO=50",
     "-ExposureProgram=Program AE",
+    "-ExposureMode=Auto",
     "-ExposureCompensation=0",
     "-BrightnessValue=7",
     "-MeteringMode=Multi-segment",
@@ -39,12 +42,15 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     "-ExifVersion=0232",
     "-ColorSpace=sRGB",
     "-FileSource=Digital Still Camera",
+    "-Orientation=1",
     "-UserComment=iPhone profile: " + model.label + " - " + model.megapixels + " MP",
     ...(width && height ? ["-PixelXDimension=" + width, "-PixelYDimension=" + height] : []),
     "-XMP:Make=" + model.make,
     "-XMP:Model=" + model.model,
     "-XMP:CreatorTool=Apple " + model.label,
     "-XMP:Description=" + model.megapixels + " MP iPhone metadata profile",
+    "-XMP-aux:Lens=" + model.lensModel,
+    "-XMP-aux:LensInfo=" + lensInfo,
     filePath
   ];
 
@@ -55,9 +61,9 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
 
   const verify = await exec("exiftool", [
     "-j",
-    "-Make", "-Model", "-Software", "-LensMake", "-LensModel",
+    "-Make", "-Model", "-Software", "-LensMake", "-LensModel", "-LensInfo",
     "-FocalLength", "-FocalLengthIn35mmFormat", "-FNumber",
-    "-ExposureTime", "-ISO", "-ExposureProgram", "-ExposureCompensation",
+    "-ExposureTime", "-ISO", "-ExposureProgram", "-ExposureMode", "-ExposureCompensation",
     "-MeteringMode", "-WhiteBalance", "-Flash",
     "-DateTimeOriginal", "-UserComment", "-PixelXDimension", "-PixelYDimension",
     filePath
@@ -77,6 +83,7 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     ["Software", model.software],
     ["LensMake", model.lensMake],
     ["LensModel", model.lensModel],
+    ["LensInfo", String(model.focalLength)],
     ["FocalLength", String(model.focalLength)],
     ["FocalLengthIn35mmFormat", String(model.focalLength35mm)],
     ["FNumber", String(model.fNumber)],
