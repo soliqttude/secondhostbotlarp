@@ -153,29 +153,40 @@ export async function encodeAsHeic(
   const dir = path.dirname(inputPath);
   const base = path.basename(inputPath, path.extname(inputPath));
   const outputPath = path.join(dir, `${base}.heic`);
-  const q = Math.max(1, Math.min(100, Math.round(quality)));
+  const qualities = Array.from(new Set([quality, 65, 55, 45, 35, 25]))
+    .map((v) => Math.max(1, Math.min(100, Math.round(v))));
+  const maxDiscordBytes = 9.5 * 1024 * 1024;
 
-  try {
-    await execFileAsync(
-      "heif-enc",
-      ["--hevc", "--quality", String(q), inputPath, "--output", outputPath],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
-    );
-  } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      throw new Error(
-        "HEIC encoder unavailable: libheif/heif-enc is not installed in the Render runtime",
+  let lastError: unknown = null;
+  for (const q of qualities) {
+    try {
+      await fs.rm(outputPath, { force: true }).catch(() => {});
+      await execFileAsync(
+        "heif-enc",
+        ["--hevc", "--quality", String(q), inputPath, "--output", outputPath],
+        { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
       );
+    } catch (error: any) {
+      lastError = error;
+      if (error?.code === "ENOENT") {
+        throw new Error(
+          "HEIC encoder unavailable: libheif/heif-enc is not installed in the Render runtime",
+        );
+      }
+      const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+      const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+      const detail = stderr || stdout || error?.message || "unknown heif-enc error";
+      throw new Error(`HEIC encoding failed: ${detail}`);
     }
-    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
-    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
-    const detail = stderr || stdout || error?.message || "unknown heif-enc error";
-    throw new Error(`HEIC encoding failed: ${detail}`);
+
+    const stat = await fs.stat(outputPath).catch(() => null);
+    if (!stat || stat.size === 0) continue;
+    if (stat.size <= maxDiscordBytes) {
+      return { outputPath, bytes: stat.size };
+    }
   }
 
-  const stat = await fs.stat(outputPath).catch(() => null);
-  if (!stat || stat.size === 0) {
-    throw new Error("HEIC encoding failed: heif-enc produced no output file");
-  }
-  return { outputPath, bytes: stat.size };
+  await fs.rm(outputPath, { force: true }).catch(() => {});
+  if (lastError instanceof Error) throw lastError;
+  throw new Error("HEIC encoding failed: output is too large for Discord");
 }
