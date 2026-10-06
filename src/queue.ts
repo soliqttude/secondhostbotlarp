@@ -29,6 +29,7 @@ interface QueuedJob<T> {
   run: (ctx: JobContext) => Promise<T>;
   resolve: (v: T) => void;
   reject: (e: unknown) => void;
+  controller: AbortController;
 }
 
 const activeUsers = new Set<number>();
@@ -86,6 +87,9 @@ export function killQueue(): { dropped: number } {
   const dropped = pending.length;
   while (pending.length) {
     const job = pending.shift()!;
+    job.controller.abort();
+    inflight.delete(job.ctx.jobKey);
+    db.prepare("DELETE FROM processed_jobs WHERE job_key = ?").run(job.ctx.jobKey);
     job.reject(new Error("queue killed"));
   }
   return { dropped };
@@ -97,6 +101,8 @@ export function resetQueue(): void {
   inflight.clear();
   while (pending.length) {
     const job = pending.shift()!;
+    job.controller.abort();
+    db.prepare("DELETE FROM processed_jobs WHERE job_key = ?").run(job.ctx.jobKey);
     job.reject(new Error("queue reset"));
   }
   processing = false;
@@ -135,6 +141,7 @@ export async function submit<T>(
       run,
       resolve,
       reject,
+      controller: ac,
     };
     pending.push(job as QueuedJob<unknown>);
 
@@ -165,7 +172,7 @@ async function runOne(job: QueuedJob<unknown>): Promise<void> {
   }
   activeUsers.add(ctx.userId);
 
-  const ac = new AbortController();
+  const ac = job.controller;
   const linkedCtx: JobContext = { ...ctx, signal: ac.signal };
 
   const timer = setTimeout(() => {
