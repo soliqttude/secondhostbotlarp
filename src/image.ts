@@ -42,7 +42,7 @@ export async function processImage(url: string, originalName: string, model: IPh
       "-strip",
       "-interlace", "Plane",
       "-sampling-factor", "4:4:4",
-      "-quality", "95",
+      "-quality", "88",
       "JPEG:" + outputFile
     ], { timeout: 120_000, maxBuffer: 1024 * 1024 });
 
