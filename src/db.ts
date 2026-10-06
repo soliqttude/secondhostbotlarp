@@ -152,5 +152,6 @@ export function setSetting(key: string, value: string): void {
 export function backupDatabase(targetPath: string): void {
   const dir = path.dirname(targetPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  rawDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   fs.copyFileSync(DB_PATH, targetPath);
 }
