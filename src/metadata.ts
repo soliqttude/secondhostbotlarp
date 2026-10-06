@@ -4,34 +4,64 @@ import type { IPhoneModel } from "./models.js";
 
 const exec = promisify(execFile);
 
-export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date()): Promise<void> {
+export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, capturedAt = new Date(), width?: number, height?: number): Promise<void> {
   const date = capturedAt.toISOString().slice(0, 19).replace("T", " ");
   const args = [
     "-overwrite_original", "-P", "-m",
-    "-EXIF:Make=" + model.make, "-EXIF:Model=" + model.model, "-EXIF:Software=" + model.software,
-    "-EXIF:LensMake=" + model.lensMake, "-EXIF:LensModel=" + model.lensModel,
-    "-EXIF:FocalLength=" + model.focalLength, "-EXIF:FocalLengthIn35mmFormat=" + model.focalLength35mm,
-    "-EXIF:FNumber=" + model.fNumber, "-EXIF:ExposureProgram=Program AE",
-    "-EXIF:DateTimeOriginal=" + date, "-EXIF:CreateDate=" + date, "-EXIF:ModifyDate=" + date,
-    "-EXIF:ExifVersion=0232", "-EXIF:ColorSpace=sRGB", "-EXIF:Flash=No Flash",
-    "-EXIF:WhiteBalance=Auto", "-EXIF:MeteringMode=Multi-segment",
-    "-EXIF:UserComment=iPhone profile: " + model.label + " - " + model.megapixels + " MP",
-    "-XMP:Make=" + model.make, "-XMP:Model=" + model.model,
+    "-Make=" + model.make,
+    "-Model=" + model.model,
+    "-Software=" + model.software,
+    "-LensMake=" + model.lensMake,
+    "-LensModel=" + model.lensModel,
+    "-FocalLength=" + model.focalLength,
+    "-FocalLengthIn35mmFormat=" + model.focalLength35mm,
+    "-FNumber=" + model.fNumber,
+    "-ApertureValue=" + Math.log2(model.fNumber * model.fNumber),
+    "-MaxApertureValue=" + Math.log2(model.fNumber * model.fNumber),
+    "-ExposureTime=1/120",
+    "-ShutterSpeedValue=" + Math.log2(120),
+    "-ISO=50",
+    "-ExposureProgram=Program AE",
+    "-ExposureCompensation=0",
+    "-BrightnessValue=7",
+    "-MeteringMode=Multi-segment",
+    "-WhiteBalance=Auto",
+    "-Flash=No Flash",
+    "-DigitalZoomRatio=1",
+    "-SceneCaptureType=Standard",
+    "-CustomRendered=Normal Process",
+    "-Contrast=Normal",
+    "-Saturation=Normal",
+    "-Sharpness=Normal",
+    "-DateTimeOriginal=" + date,
+    "-CreateDate=" + date,
+    "-ModifyDate=" + date,
+    "-ExifVersion=0232",
+    "-ColorSpace=sRGB",
+    "-FileSource=Digital Still Camera",
+    "-UserComment=iPhone profile: " + model.label + " - " + model.megapixels + " MP",
+    ...(width && height ? ["-PixelXDimension=" + width, "-PixelYDimension=" + height] : []),
+    "-XMP:Make=" + model.make,
+    "-XMP:Model=" + model.model,
     "-XMP:CreatorTool=Apple " + model.label,
     "-XMP:Description=" + model.megapixels + " MP iPhone metadata profile",
     filePath
   ];
 
-  const result = await exec("exiftool", args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+  const result = await exec("exiftool", args, { timeout: 30_000, maxBuffer: 1024 * 1024 });
   if (result.stderr.trim() && !result.stderr.includes("image files updated")) {
     throw new Error(result.stderr.trim());
   }
 
   const verify = await exec("exiftool", [
-    "-j", "-EXIF:Make", "-EXIF:Model", "-EXIF:Software",
-    "-EXIF:LensModel", "-EXIF:FocalLength", "-EXIF:FNumber",
-    "-EXIF:DateTimeOriginal", "-EXIF:UserComment", filePath
-  ], { timeout: 10000, maxBuffer: 1024 * 1024 });
+    "-j",
+    "-Make", "-Model", "-Software", "-LensMake", "-LensModel",
+    "-FocalLength", "-FocalLengthIn35mmFormat", "-FNumber",
+    "-ExposureTime", "-ISO", "-ExposureProgram", "-ExposureCompensation",
+    "-MeteringMode", "-WhiteBalance", "-Flash",
+    "-DateTimeOriginal", "-UserComment", "-PixelXDimension", "-PixelYDimension",
+    filePath
+  ], { timeout: 10_000, maxBuffer: 1024 * 1024 });
 
   let data: Record<string, unknown>;
   try {
@@ -41,11 +71,29 @@ export async function applyIPhoneMetadata(filePath: string, model: IPhoneModel, 
     throw new Error("EXIF verification failed: ExifTool returned invalid metadata");
   }
 
-  if (String(data.Make ?? "") !== model.make || String(data.Model ?? "") !== model.model) {
-    throw new Error("EXIF verification failed: metadata was not written to the output image");
+  const required: Array<[string, string]> = [
+    ["Make", model.make],
+    ["Model", model.model],
+    ["Software", model.software],
+    ["LensMake", model.lensMake],
+    ["LensModel", model.lensModel],
+    ["FocalLength", String(model.focalLength)],
+    ["FocalLengthIn35mmFormat", String(model.focalLength35mm)],
+    ["FNumber", String(model.fNumber)],
+    ["ExposureTime", "1/120"],
+    ["ISO", "50"],
+    ["WhiteBalance", "Auto"],
+    ["Flash", "No Flash"]
+  ];
+
+  for (const [tag, expected] of required) {
+    if (!String(data[tag] ?? "").includes(expected)) {
+      throw new Error("EXIF verification failed: " + tag + " was not written correctly");
+    }
   }
-  if (!String(data.UserComment ?? "").includes(model.megapixels + " MP")) {
-    throw new Error("EXIF verification failed: megapixel profile was not written");
+
+  if (width && height && (Number(data.PixelXDimension) !== width || Number(data.PixelYDimension) !== height)) {
+    throw new Error("EXIF verification failed: pixel dimensions are incorrect");
   }
 }
 
