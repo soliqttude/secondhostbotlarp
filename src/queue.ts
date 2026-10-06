@@ -175,25 +175,28 @@ async function runOne(job: QueuedJob<unknown>): Promise<void> {
   const ac = job.controller;
   const linkedCtx: JobContext = { ...ctx, signal: ac.signal };
 
+  let timedOut = false;
   const timer = setTimeout(() => {
+    timedOut = true;
     ac.abort();
   }, JOB_TIMEOUT_MS);
 
   try {
-    const result = await Promise.race([
-      run(linkedCtx),
-      new Promise((_, rej) =>
-        ac.signal.addEventListener("abort", () =>
-          rej(new Error("job timeout")),
-        ),
-      ),
-    ]);
+    // Do not race the worker against the timeout. Abort the worker at the
+    // deadline, then wait for it to actually unwind before releasing the
+    // user's active-job lock. This prevents timed-out image work from
+    // continuing while the queue accepts another job for the same user.
+    const result = await run(linkedCtx);
+    if (timedOut) {
+      throw new Error("job timeout");
+    }
     resolve(result);
   } catch (err) {
-    // A failed job must be retryable. Successful jobs remain in
-    // processed_jobs as an idempotency record.
     db.prepare("DELETE FROM processed_jobs WHERE job_key = ?").run(ctx.jobKey);
-    logger.warn({ err, userId: ctx.userId, jobKey: ctx.jobKey }, "job failed");
+    logger.warn(
+      { err, userId: ctx.userId, jobKey: ctx.jobKey, timedOut },
+      "job failed",
+    );
     reject(err);
   } finally {
     clearTimeout(timer);
