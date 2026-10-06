@@ -112,7 +112,12 @@ export async function injectIPhoneExif(
     Orientation: "Vertical (normal)",
   };
 
-  await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
+  try {
+    await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
+  } catch (error) {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
 
   return {
     outputPath: targetPath,
