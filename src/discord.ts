@@ -4,7 +4,7 @@ import {ensureUser,effectiveRole,ROLE_LABEL,hasRoleAtLeast,getUser,getUserByDisc
 import {db,nowMs} from "./db.js"; import {getBalance,addCredits,setCredits,takeCredits,deductCredit,refundCredit,InsufficientCreditsError} from "./credits.js";
 import {IPHONE_MODELS,findModel} from "./models.js"; import {IMAGE_COST,MAX_IMAGE_BYTES,TMP_DIR,SUPPORT_CONTACT} from "./config.js";
 import {resizeToAppleSensor,analyzeBrightness,pickRealisticExposure,encodeAsHeic} from "./image.js"; import {injectIPhoneExif} from "./exif.js";
-import {submit,QueueFullError,UserBusyError,DuplicateJobError} from "./queue.js"; import {writeLog,recentLogs,clearLogs} from "./logs.js";
+import {submit,QueueFullError,UserBusyError,DuplicateJobError,JobTimeoutError} from "./queue.js"; import {writeLog,recentLogs,clearLogs} from "./logs.js";
 import {analyticsSummary,serverStats,topModelsTable,topUsersTable} from "./analytics.js"; import {logger} from "./logger.js"; import {state,setMaintenance,setLocked,setPanic,setDebug,setRateLimit} from "./state.js"; import {killQueue,resetQueue,queueStats} from "./queue.js"; import {backupDatabase} from "./db.js"; import {BACKUP_DIR} from "./config.js";
 
 const C=(new SlashCommandBuilder()).setName("start").setDescription("Show the bot panel.");
@@ -43,6 +43,138 @@ async function command(i:any){
 }
 async function batch(i:any){const files=["image1","image2","image3","image4","image5"].map(n=>i.options.getAttachment(n)).filter(Boolean);if(!files.length)return i.reply({content:"Add at least one image.",ephemeral:true});if(files.some((a:any)=>!a.contentType?.startsWith("image/")||a.size>MAX_IMAGE_BYTES))return i.reply({content:"All batch files must be images under 20 MB each.",ephemeral:true});const key="batch:"+i.user.id+":"+Date.now();pending.set(i.user.id,{url:JSON.stringify(files.map((a:any)=>({url:a.url,name:a.name||"image"}))),name:key});return i.reply({content:`Batch ready: ${files.length} image(s). Choose the iPhone model:`,components:[modelMenu()],ephemeral:true})}
 async function image(i:any){const a=i.options.getAttachment("image",true);if(!a.contentType?.startsWith("image/"))return i.reply({content:"Upload an image.",ephemeral:true});if(a.size>MAX_IMAGE_BYTES)return i.reply({content:"Maximum image size is 20 MB.",ephemeral:true});pending.set(i.user.id,{url:a.url,name:a.name||"image"});return i.reply({content:"Choose the iPhone model:",components:[modelMenu()],ephemeral:true})}
-async function modelSelect(i:any){if(i.customId!=="model-select")return;const k=i.values[0],x=pending.get(i.user.id),m=findModel(k);if(!x||!m)return i.reply({content:"Selection expired. Run /image again.",ephemeral:true});pending.delete(i.user.id);await i.deferReply({ephemeral:true});const id=ensureUser(i.user.id,i.user.username,i.user.globalName??i.user.username).user_id;let charged=0;try{const batchFiles=x.name.startsWith("batch:")?JSON.parse(x.url):null;if(batchFiles){const total=batchFiles.length;deductCredit(id,IMAGE_COST*total,"batch_reserve");charged=IMAGE_COST*total;for(let n=0;n<batchFiles.length;n++){const file=batchFiles[n];await processDiscordImage(i,id,file.url,file.name,m,`batch:${x.name}:${n}`);charged-=IMAGE_COST;}await i.editReply(`✅ Batch complete: ${total} image(s).`);return;}deductCredit(id,IMAGE_COST,"image_exif");charged=IMAGE_COST;const key=`img:${id}:${crypto.createHash("sha256").update(x.url).digest("hex")}:${m.key}`;await submit({userId:id,jobKey:key},async jc=>{const dir=path.join(TMP_DIR,"discord_"+crypto.randomBytes(5).toString("hex"));await fs.mkdir(dir,{recursive:true});try{await i.editReply("⏳ Processing…");const r=await fetch(x.url,{signal:jc.signal});if(!r.ok)throw Error("download failed");const buf=Buffer.from(await r.arrayBuffer());const input=path.join(dir,"input");await fs.writeFile(input,buf);const resized=await resizeToAppleSensor(input,m.megapixels);const ex=pickRealisticExposure(await analyzeBrightness(resized.outputPath));const heic=await encodeAsHeic(resized.outputPath);const out=await injectIPhoneExif(heic.outputPath,m,{width:resized.width,height:resized.height},new Date(),ex);await i.editReply({content:`✅ ${m.label} EXIF applied.`,files:[new AttachmentBuilder(out.outputPath,{name:"IMG_iPhone.heic"})]});db.prepare("INSERT INTO images(user_id,model,message_id,file_unique,created_at) VALUES(?,?,?,?,?)").run(id,m.label,0,key,nowMs());writeLog({type:"image",userId:id,action:"exif_injected",meta:{model:m.label,iso:ex.iso}});await out.cleanup()}finally{await fs.rm(dir,{recursive:true,force:true}).catch(()=>{})}});charged=0}catch(e){logger.error({err:e,userId:id},"image processing failed");if(charged>0)refundCredit(id,charged,"pipeline_failure");const msg=e instanceof Error && e.message.startsWith("Missing image tools:")?`Image pipeline unavailable: ${e.message}`:e instanceof InsufficientCreditsError?`Not enough credits. You have ${e.available}.`:e instanceof QueueFullError?"Queue is full.":e instanceof UserBusyError?"You already have an image processing.":e instanceof DuplicateJobError?"That image is already processing.":`Processing failed: ${e instanceof Error?e.message:"unknown error"} — your credit was refunded.`;await i.editReply(msg).catch(()=>{})}}
 
-async function processDiscordImage(i:any,id:number,url:string,name:string,m:any,key:string){const dir=path.join(TMP_DIR,"discord_"+crypto.randomBytes(5).toString("hex"));await fs.mkdir(dir,{recursive:true});try{const r=await fetch(url);if(!r.ok)throw Error("download failed");const input=path.join(dir,"input");await fs.writeFile(input,Buffer.from(await r.arrayBuffer()));const resized=await resizeToAppleSensor(input,m.megapixels);const ex=pickRealisticExposure(await analyzeBrightness(resized.outputPath));const heic=await encodeAsHeic(resized.outputPath);const out=await injectIPhoneExif(heic.outputPath,m,{width:resized.width,height:resized.height},new Date(),ex);await i.followUp({content:`✅ ${m.label} — ISO ${ex.iso}, ${ex.exposureTimeStr}`,files:[new AttachmentBuilder(out.outputPath,{name:`IMG_${id}_${Date.now()}.heic`})],ephemeral:true});db.prepare("INSERT INTO images(user_id,model,message_id,file_unique,created_at) VALUES(?,?,?,?,?)").run(id,m.label,0,key,nowMs());writeLog({type:"image",userId:id,action:"exif_injected",meta:{model:m.label,iso:ex.iso}});await out.cleanup()}finally{await fs.rm(dir,{recursive:true,force:true}).catch(()=>{})}}
+async function safeEditReply(i:any,payload:any):Promise<void>{
+ try{await i.editReply(payload);}catch(err){logger.error({err},"discord editReply failed");}
+}
+
+async function modelSelect(i:any){
+ if(i.customId!=="model-select")return;
+ const k=i.values[0],x=pending.get(i.user.id),m=findModel(k);
+ if(!x||!m)return i.reply({content:"Selection expired. Run /image again.",ephemeral:true});
+ pending.delete(i.user.id);
+ await i.deferReply({ephemeral:true});
+ const id=ensureUser(i.user.id,i.user.username,i.user.globalName??i.user.username).user_id;
+ let charged=0;
+ let stage="init";
+ try{
+  const batchFiles=x.name.startsWith("batch:")?JSON.parse(x.url):null;
+  if(batchFiles){
+   const total=batchFiles.length;
+   deductCredit(id,IMAGE_COST*total,"batch_reserve");
+   charged=IMAGE_COST*total;
+   for(let n=0;n<batchFiles.length;n++){
+    const file=batchFiles[n];
+    stage=`batch:${n}`;
+    await processDiscordImage(i,id,file.url,file.name,m,`batch:${x.name}:${n}`);
+    charged-=IMAGE_COST;
+   }
+   await safeEditReply(i,`✅ Batch complete: ${total} image(s).`);
+   return;
+  }
+  deductCredit(id,IMAGE_COST,"image_exif");
+  charged=IMAGE_COST;
+  const key=`img:${id}:${crypto.createHash("sha256").update(x.url).digest("hex")}:${m.key}`;
+  logger.info({userId:id,model:m.key,jobKey:key},"image:job:queued");
+  await submit({userId:id,jobKey:key},async jc=>{
+   const dir=path.join(TMP_DIR,"discord_"+crypto.randomBytes(5).toString("hex"));
+   await fs.mkdir(dir,{recursive:true});
+   let outCleanup:(()=>Promise<void>)|null=null;
+   try{
+    stage="processing-ack";
+    await safeEditReply(i,"⏳ Processing…");
+    stage="download";
+    logger.info({userId:id,url:x.url.slice(0,80)},"image:download:start");
+    const tDownload=Date.now();
+    const r=await fetch(x.url,{signal:jc.signal});
+    if(!r.ok)throw new Error(`download failed: HTTP ${r.status}`);
+    const buf=Buffer.from(await r.arrayBuffer());
+    const input=path.join(dir,"input");
+    await fs.writeFile(input,buf);
+    logger.info({userId:id,bytes:buf.length,ms:Date.now()-tDownload},"image:download:done");
+    if(jc.signal.aborted)throw new Error("job aborted after download");
+    stage="resize";
+    const resized=await resizeToAppleSensor(input,m.megapixels);
+    stage="brightness";
+    const luma=await analyzeBrightness(resized.outputPath);
+    const ex=pickRealisticExposure(luma);
+    stage="heic";
+    const heic=await encodeAsHeic(resized.outputPath,75,jc.signal);
+    if(jc.signal.aborted)throw new Error("job aborted after heic");
+    stage="exif";
+    const out=await injectIPhoneExif(heic.outputPath,m,{width:resized.width,height:resized.height},new Date(),ex);
+    outCleanup=out.cleanup;
+    if(jc.signal.aborted)throw new Error("job aborted before discord send");
+    stage="discord-send";
+    logger.info({userId:id,path:out.outputPath,heicBytes:heic.bytes},"image:discord:send:start");
+    const tSend=Date.now();
+    await Promise.race([
+     i.editReply({content:`✅ ${m.label} EXIF applied.`,files:[new AttachmentBuilder(out.outputPath,{name:"IMG_iPhone.heic"})]}),
+     new Promise((_,rej)=>setTimeout(()=>rej(new Error("Discord file upload timed out after 60s")),60_000)),
+    ]);
+    logger.info({userId:id,ms:Date.now()-tSend},"image:discord:send:done");
+    db.prepare("INSERT INTO images(user_id,model,message_id,file_unique,created_at) VALUES(?,?,?,?,?)").run(id,m.label,0,key,nowMs());
+    writeLog({type:"image",userId:id,action:"exif_injected",meta:{model:m.label,iso:ex.iso}});
+    if(outCleanup)await outCleanup();
+    outCleanup=null;
+   }finally{
+    if(outCleanup)await outCleanup().catch(()=>{});
+    await fs.rm(dir,{recursive:true,force:true}).catch(()=>{});
+   }
+  });
+  charged=0;
+ }catch(e){
+  logger.error({err:e,userId:id,stage},"image processing failed");
+  if(charged>0){
+   try{refundCredit(id,charged,"pipeline_failure");}catch(refundErr){logger.error({err:refundErr,userId:id},"credit refund failed");}
+  }
+  const msg=
+   e instanceof Error&&e.message.startsWith("Missing image tools:")?`Image pipeline unavailable: ${e.message}`:
+   e instanceof InsufficientCreditsError?`Not enough credits. You have ${e.available}.`:
+   e instanceof QueueFullError?"Queue is full.":
+   e instanceof UserBusyError?"You already have an image processing.":
+   e instanceof DuplicateJobError?"That image is already processing.":
+   e instanceof JobTimeoutError?`Processing timed out at stage \`${stage}\` — your credit was refunded.`:
+   `Processing failed at \`${stage}\`: ${e instanceof Error?e.message:"unknown error"} — your credit was refunded.`;
+  await safeEditReply(i,msg);
+ }
+}
+
+async function processDiscordImage(i:any,id:number,url:string,name:string,m:any,key:string){
+ const dir=path.join(TMP_DIR,"discord_"+crypto.randomBytes(5).toString("hex"));
+ await fs.mkdir(dir,{recursive:true});
+ let stage="batch-init";
+ let outCleanup:(()=>Promise<void>)|null=null;
+ try{
+  stage="download";
+  logger.info({userId:id,url:url.slice(0,80)},"image:download:start");
+  const r=await fetch(url);
+  if(!r.ok)throw new Error(`download failed: HTTP ${r.status}`);
+  const input=path.join(dir,"input");
+  await fs.writeFile(input,Buffer.from(await r.arrayBuffer()));
+  logger.info({userId:id},"image:download:done");
+  stage="resize";
+  const resized=await resizeToAppleSensor(input,m.megapixels);
+  stage="brightness";
+  const ex=pickRealisticExposure(await analyzeBrightness(resized.outputPath));
+  stage="heic";
+  const heic=await encodeAsHeic(resized.outputPath);
+  stage="exif";
+  const out=await injectIPhoneExif(heic.outputPath,m,{width:resized.width,height:resized.height},new Date(),ex);
+  outCleanup=out.cleanup;
+  stage="discord-send";
+  logger.info({userId:id},"image:discord:send:start");
+  await i.followUp({content:`✅ ${m.label} — ISO ${ex.iso}, ${ex.exposureTimeStr}`,files:[new AttachmentBuilder(out.outputPath,{name:`IMG_${id}_${Date.now()}.heic`})],ephemeral:true});
+  logger.info({userId:id},"image:discord:send:done");
+  db.prepare("INSERT INTO images(user_id,model,message_id,file_unique,created_at) VALUES(?,?,?,?,?)").run(id,m.label,0,key,nowMs());
+  writeLog({type:"image",userId:id,action:"exif_injected",meta:{model:m.label,iso:ex.iso}});
+  if(outCleanup)await outCleanup();
+  outCleanup=null;
+ }catch(e){
+  logger.error({err:e,userId:id,stage},"batch image processing failed");
+  throw e;
+ }finally{
+  if(outCleanup)await outCleanup().catch(()=>{});
+  await fs.rm(dir,{recursive:true,force:true}).catch(()=>{});
+ }
+}
