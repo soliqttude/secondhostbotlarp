@@ -17,11 +17,8 @@ new SlashCommandBuilder().setName("help").setDescription("Show bot help"),
 new SlashCommandBuilder().setName("addcredits").setDescription("Add credits to a user").addUserOption(o=>o.setName("user").setDescription("User").setRequired(true)).addIntegerOption(o=>o.setName("amount").setDescription("Amount").setMinValue(1).setRequired(true))
 ];
 
-function modelMenu(){return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(SELECT_ID).setPlaceholder("Choose an iPhone model").addOptions(IPHONE_MODELS.map(m=>({label:m.label,value:m.key,description:m.megapixels+" MP - metadata only"}))));}
-function outputName(modelKey:string,originalName:string){
-const ext=originalName.match(/\.(jpe?g|png|webp|heic|heif|tiff?)$/i)?.[0]?.toLowerCase()??".jpg";
-return "IMG_"+modelKey+"_metadata"+ext;
-}
+function modelMenu(){return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(SELECT_ID).setPlaceholder("Choose an iPhone model").addOptions(IPHONE_MODELS.map(m=>({label:m.label,value:m.key,description:m.megapixels+" MP - full iPhone profile"}))));}
+function outputName(modelKey:string){return "IMG_"+modelKey+"_metadata.jpg";}
 
 export async function registerCommands(){
 const rest=new REST({version:"10"}).setToken(DISCORD_TOKEN);
@@ -45,7 +42,7 @@ if(i.commandName==="image"){
 const a=i.options.getAttachment("photo",true);
 if(!/^image\//i.test(a.contentType??"")){await i.reply({content:"❌ Please upload an image.",ephemeral:true});return;}
 pending.set(i.user.id,{url:a.url,name:a.name});
-await i.reply({content:"📷 "+a.name+"\nChoose the iPhone profile. Only metadata will be changed.",components:[modelMenu()],ephemeral:true});return;
+await i.reply({content:"📷 "+a.name+"\nChoose the iPhone profile. The photo will be processed at the selected iPhone resolution and given the full camera metadata profile.",components:[modelMenu()],ephemeral:true});return;
 }
 if(i.commandName==="models"){await i.reply({embeds:[new EmbedBuilder().setTitle("iPhone profiles").setDescription(IPHONE_MODELS.map(m=>"**"+m.label+"** - "+m.megapixels+" MP").join("\n"))],ephemeral:true});return;}
 if(i.commandName==="credits"){await i.reply({content:"💳 You have **"+getCredits(i.user.id)+"** credits.",ephemeral:true});return;}
@@ -63,14 +60,14 @@ if(!model||!source){await i.update({content:"❌ This selection expired. Run /im
 const balance=getCredits(i.user.id);
 if(balance<1){await i.update({content:"❌ You don't have enough credits.",components:[]});return;}
 
-await i.update({content:"⏳ Applying **"+model.label+"** metadata…",components:[]});
+await i.update({content:"⏳ Processing **"+model.label+"** at "+model.megapixels+" MP and applying full camera metadata…",components:[]});
 credits.set(i.user.id,balance-1);pending.delete(i.user.id);
 
 try{
 const result=await processImage(source.url,source.name,model,i.user.id);
 await i.followUp({
-content:"✅ **Photo ready** — "+model.label+" metadata was applied and verified. Tap the photo, then use **Save to Photos**.",
-files:[new AttachmentBuilder(result.buffer,{name:outputName(model.key,source.name)})]
+content:"✅ **Photo ready** — "+model.label+" profile applied and verified at "+model.targetWidth+" × "+model.targetHeight+" pixels. The attachment is a real JPEG photo, so on iPhone you can tap it and use **Save to Photos**.",
+files:[new AttachmentBuilder(result.buffer,{name:outputName(model.key)})]
 });
 await result.cleanup();
 }catch(error){
