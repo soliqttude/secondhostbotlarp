@@ -163,7 +163,7 @@ export async function encodeAsHeic(
       await fs.rm(outputPath, { force: true }).catch(() => {});
       await execFileAsync(
         "heif-enc",
-        ["--quality", String(q), inputPath, "--output", outputPath],
+        ["--quality", String(q), "--output", outputPath, inputPath],
         { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
       );
     } catch (error: any) {
