@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { TMP_DIR } from "./config.js";
 import type { IPhoneModelMeta } from "./models.js";
+import { logger } from "./logger.js";
 
 const exiftool = new ExifTool({
   taskTimeoutMillis: 120_000,
@@ -50,10 +51,6 @@ export interface InjectResult {
   cleanup: () => Promise<void>;
 }
 
-/**
- * Run exiftool to inject realistic iPhone metadata into an image file.
- * Returns the path of the resulting file (overwrites input in place, no _original).
- */
 export interface InjectDimensions {
   width: number;
   height: number;
@@ -79,55 +76,69 @@ export async function injectIPhoneExif(
     `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
   );
   await fs.mkdir(workDir, { recursive: true });
+  logger.info({ inputPath, model: meta.model, dims }, "image:exif:start");
+  const t0 = Date.now();
   try {
     const ext = path.extname(inputPath) || ".jpg";
     const targetPath = path.join(workDir, `IMG_${capturedAt.getTime()}${ext}`);
     await fs.copyFile(inputPath, targetPath);
 
     const tags: Record<string, string | number> = {
-    Make: "Apple",
-    Model: meta.model,
-    Software: meta.software,
-    LensMake: "Apple",
-    LensModel: meta.lensModel,
-    FNumber: meta.fNumber,
-    ApertureValue: meta.fNumber,
-    ISO: iso,
-    ExposureTime: shutter,
-    ShutterSpeedValue: shutter,
-    FocalLength: meta.focalLength,
-    FocalLengthIn35mmFormat: meta.focalLengthIn35mm,
-    "IFD0:ImageWidth": dims.width,
-    "IFD0:ImageHeight": dims.height,
-    "ExifIFD:ExifImageWidth": dims.width,
-    "ExifIFD:ExifImageHeight": dims.height,
-    "XMP-tiff:ImageWidth": dims.width,
-    "XMP-tiff:ImageHeight": dims.height,
-    DateTimeOriginal: ts.date,
-    CreateDate: ts.date,
-    ModifyDate: ts.date,
-    OffsetTime: ts.offset,
-    OffsetTimeOriginal: ts.offset,
-    OffsetTimeDigitized: ts.offset,
-    ExifVersion: "0232",
-    ColorSpace: 1,
-    Flash: "Off, Did not fire",
-    WhiteBalance: "Auto",
-    MeteringMode: "Multi-segment",
-    ExposureProgram: "Program AE",
-    Orientation: "Vertical (normal)",
-  };
+      Make: "Apple",
+      Model: meta.model,
+      Software: meta.software,
+      LensMake: "Apple",
+      LensModel: meta.lensModel,
+      FNumber: meta.fNumber,
+      ApertureValue: meta.fNumber,
+      ISO: iso,
+      ExposureTime: shutter,
+      ShutterSpeedValue: shutter,
+      FocalLength: meta.focalLength,
+      FocalLengthIn35mmFormat: meta.focalLengthIn35mm,
+      "IFD0:ImageWidth": dims.width,
+      "IFD0:ImageHeight": dims.height,
+      "ExifIFD:ExifImageWidth": dims.width,
+      "ExifIFD:ExifImageHeight": dims.height,
+      "XMP-tiff:ImageWidth": dims.width,
+      "XMP-tiff:ImageHeight": dims.height,
+      DateTimeOriginal: ts.date,
+      CreateDate: ts.date,
+      ModifyDate: ts.date,
+      OffsetTime: ts.offset,
+      OffsetTimeOriginal: ts.offset,
+      OffsetTimeDigitized: ts.offset,
+      ExifVersion: "0232",
+      ColorSpace: 1,
+      Flash: "Off, Did not fire",
+      WhiteBalance: "Auto",
+      MeteringMode: "Multi-segment",
+      ExposureProgram: "Program AE",
+      Orientation: "Vertical (normal)",
+    };
 
-    await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
+    await exiftool.write(targetPath, tags as any, [
+      "-overwrite_original",
+      "-q",
+      "-m",
+    ]);
+    logger.info(
+      { targetPath, ms: Date.now() - t0 },
+      "image:exif:done",
+    );
     return {
       outputPath: targetPath,
       cleanup: async () => {
-        try { await fs.rm(workDir, { recursive: true, force: true }); } catch {}
+        try {
+          await fs.rm(workDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
       },
     };
   } catch (error) {
+    logger.error({ err: error, ms: Date.now() - t0 }, "image:exif:failed");
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
 }
-
