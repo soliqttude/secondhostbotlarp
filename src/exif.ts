@@ -109,7 +109,7 @@ export async function injectIPhoneExif(
     WhiteBalance: "Auto",
     MeteringMode: "Multi-segment",
     ExposureProgram: "Program AE",
-    Orientation: "Horizontal (normal)",
+    Orientation: "Vertical (normal)",
   };
 
   await exiftool.write(targetPath, tags as any, ["-overwrite_original", "-q", "-m"]);
