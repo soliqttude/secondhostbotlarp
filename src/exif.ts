@@ -1,11 +1,11 @@
-import { exiftool } from "exiftool-vendored";
+import { ExifTool } from "exiftool-vendored";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { TMP_DIR } from "./config.js";
 import type { IPhoneModelMeta } from "./models.js";
 
-if (!(await fileExists(TMP_DIR))) {
+const exiftool = new ExifTool({\n  taskTimeoutMillis: 120_000,\n  spawnTimeoutMillis: 60_000,\n});\n\nif (!(await fileExists(TMP_DIR))) {
   await fs.mkdir(TMP_DIR, { recursive: true });
 }
 
