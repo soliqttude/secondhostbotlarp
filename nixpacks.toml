@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "libheif", "libvips", "exiftool"]
+nixPkgs = ["nodejs_24", "libheif", "libvips", "exiftool"]
 [phases.install]
 cmds = ["npm install"]
 [start]
