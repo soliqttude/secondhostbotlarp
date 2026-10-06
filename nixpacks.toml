@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["nodejs_24", "libheif", "libde265", "x265", "libvips", "exiftool"]
-
-[phases.install]
-cmds = ["npm install"]
-
-[start]
-cmd = "npm start"
